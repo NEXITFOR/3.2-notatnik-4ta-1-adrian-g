@@ -167,7 +167,10 @@ public partial class MainWindow : Window
             sb.AppendLine(note.Content);
 
             if (i < _notes.Count - 1)
+            {
                 sb.AppendLine();
+                sb.AppendLine();
+            }
         }
 
         File.WriteAllText(_filePath, sb.ToString(), Encoding.UTF8);
