@@ -1,7 +1,8 @@
 using System;
+using System.Collections.Generic;
 using System.Collections.ObjectModel;
 using System.IO;
-using System.Text.Json;
+using System.Text;
 using Avalonia.Controls;
 using Avalonia.Interactivity;
 
@@ -16,8 +17,10 @@ public partial class MainWindow : Window
     {
         InitializeComponent();
 
-        // Plik z notatkami obok pliku wykonywalnego
-        _filePath = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "notatki.json");
+        // Plik notatki.md w folderze projektu (cofamy się z bin/Debug/net10.0)
+        var baseDir = AppContext.BaseDirectory;
+        var projectDir = Path.GetFullPath(Path.Combine(baseDir, "..", "..", ".."));
+        _filePath = Path.Combine(projectDir, "notatki.md");
 
         _notes = LoadNotes();
         NotesList.ItemsSource = _notes;
@@ -39,7 +42,7 @@ public partial class MainWindow : Window
             Id = Guid.NewGuid().ToString(),
             Title = string.IsNullOrEmpty(title) ? "(bez tytułu)" : title,
             Content = content ?? "",
-            CreatedAt = DateTime.Now.ToString("yyyy-MM-dd HH:mm:ss")
+            CreatedAt = DateTime.Now.ToString("yyyy-MM-dd HH:mm")
         };
 
         _notes.Insert(0, note);
@@ -70,7 +73,11 @@ public partial class MainWindow : Window
     }
 
     /// <summary>
-    /// Wczytuje notatki z pliku JSON.
+    /// Wczytuje notatki z pliku notatki.md.
+    /// Format wpisu:
+    /// ## 2026-09-08 14:32 — Tytuł notatki
+    ///
+    /// treść notatki
     /// </summary>
     private ObservableCollection<Note> LoadNotes()
     {
@@ -79,9 +86,64 @@ public partial class MainWindow : Window
 
         try
         {
-            var json = File.ReadAllText(_filePath);
-            var notes = JsonSerializer.Deserialize<ObservableCollection<Note>>(json);
-            return notes ?? new ObservableCollection<Note>();
+            var text = File.ReadAllText(_filePath, Encoding.UTF8);
+            var notes = new ObservableCollection<Note>();
+
+            // Dzielimy po nagłówkach ## 
+            var parts = text.Split(new[] { "\n## ", "\r\n## " }, StringSplitOptions.None);
+
+            for (int i = 0; i < parts.Length; i++)
+            {
+                var part = parts[i].Trim();
+                if (string.IsNullOrEmpty(part))
+                    continue;
+
+                // Pierwszy element może zaczynać się od "## " jeśli plik zaczyna się od nagłówka
+                if (i == 0 && part.StartsWith("## "))
+                    part = part.Substring(3);
+
+                // Pierwsza linia to "data — tytuł", reszta to treść
+                var firstNewLine = part.IndexOfAny(new[] { '\r', '\n' });
+                string headerLine;
+                string content;
+
+                if (firstNewLine >= 0)
+                {
+                    headerLine = part.Substring(0, firstNewLine).Trim();
+                    content = part.Substring(firstNewLine).Trim();
+                }
+                else
+                {
+                    headerLine = part.Trim();
+                    content = "";
+                }
+
+                // Parsujemy nagłówek: "2026-09-08 14:32 — Tytuł"
+                string createdAt;
+                string title;
+
+                var dashIndex = headerLine.IndexOf(" — ");
+                if (dashIndex >= 0)
+                {
+                    createdAt = headerLine.Substring(0, dashIndex).Trim();
+                    title = headerLine.Substring(dashIndex + 3).Trim();
+                }
+                else
+                {
+                    createdAt = "";
+                    title = headerLine;
+                }
+
+                notes.Add(new Note
+                {
+                    Id = Guid.NewGuid().ToString(),
+                    Title = title,
+                    Content = content,
+                    CreatedAt = createdAt
+                });
+            }
+
+            return notes;
         }
         catch
         {
@@ -90,13 +152,25 @@ public partial class MainWindow : Window
     }
 
     /// <summary>
-    /// Zapisuje notatki do pliku JSON.
+    /// Zapisuje wszystkie notatki do pliku notatki.md.
+    /// Najnowsza notatka na górze. Polskie znaki zachowane (UTF-8).
     /// </summary>
     private void SaveNotes()
     {
-        var options = new JsonSerializerOptions { WriteIndented = true };
-        var json = JsonSerializer.Serialize(_notes, options);
-        File.WriteAllText(_filePath, json);
+        var sb = new StringBuilder();
+
+        for (int i = 0; i < _notes.Count; i++)
+        {
+            var note = _notes[i];
+            sb.AppendLine($"## {note.CreatedAt} — {note.Title}");
+            sb.AppendLine();
+            sb.AppendLine(note.Content);
+
+            if (i < _notes.Count - 1)
+                sb.AppendLine();
+        }
+
+        File.WriteAllText(_filePath, sb.ToString(), Encoding.UTF8);
     }
 }
 
